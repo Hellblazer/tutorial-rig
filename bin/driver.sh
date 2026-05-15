@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Drive the agent pane: paste the slash command, then process ordered gates.
+# Drive the agent pane: paste each command in order, process its gates, then
+# send an exit sequence so the tmux pane dies and the recording terminates.
 # Usage: driver.sh <spec.json>
-# Env: SESSION, TMUX_TARGET (e.g. "tutorial:0.0"), IDLE_SECONDS
+# Env: SESSION, TMUX_TARGET, IDLE_SECONDS, ATTACH_GAP_SEC
 set -euo pipefail
 
 SPEC="$1"
@@ -12,27 +13,42 @@ source "$HERE/lib/sentinels.sh"
 : "${SESSION:?SESSION required}"
 : "${TMUX_TARGET:?TMUX_TARGET required (e.g. tutorial:0.0)}"
 IDLE_SECONDS="${IDLE_SECONDS:-8}"
+ATTACH_GAP_SEC="${ATTACH_GAP_SEC:-3}"
 
-# Paste a string into the target pane using buffer (reliable for long inputs).
 paste_into() {
-  local text="$1" buf="rig-buf-$$"
+  local text="$1" buf="rig-buf-$$-$RANDOM"
   tmux load-buffer -b "$buf" - <<<"$text"
   tmux paste-buffer -b "$buf" -t "$TMUX_TARGET"
   tmux delete-buffer -b "$buf" 2>/dev/null || true
   tmux send-keys -t "$TMUX_TARGET" Enter
 }
 
-# Wait until the agent pane is initialised. SessionStart hook drops a sentinel.
+# Wait for the agent pane to initialise; SessionStart hook drops a sentinel.
 sentinel_wait session-start 60 || true
-sleep 2  # let the UI settle
+# Extra gap so asciinema has time to attach before the first keystroke lands.
+sleep "$ATTACH_GAP_SEC"
 
-# 1. Paste the slash command.
-command=$(jq -r '.agent.command' "$SPEC")
-paste_into "$command"
+# Read commands. Backwards-compatible: agent.commands[] wins; agent.command is
+# treated as a one-element list.
+mapfile -t COMMANDS < <(jq -r '
+  if (.agent.commands // empty) | type == "array" then .agent.commands[]
+  elif .agent.command then .agent.command
+  else empty end
+' "$SPEC")
 
-# 2. Process gates in order.
-gate_count=$(jq '.gates | length // 0' "$SPEC")
-for ((i=0; i < gate_count; i++)); do
+if (( ${#COMMANDS[@]} == 0 )); then
+  echo "driver: spec has no agent.command or agent.commands" >&2
+  exit 2
+fi
+
+GATE_COUNT=$(jq '.gates | length // 0' "$SPEC")
+gate_idx=0
+
+answer_gate() {
+  # Gates in CC 2.x are arrow-key-navigable; default highlight is option 1.
+  # To pick option N, send (N-1) Down presses, then Enter.
+  local i="$1"
+  local wait_for answer_index pre_sec post_sec
   wait_for=$(jq -r ".gates[$i].wait_for // \"gate-pending\"" "$SPEC")
   answer_index=$(jq -r ".gates[$i].answer_index // 1" "$SPEC")
   pre_sec=$(jq -r ".gates[$i].pre_enter_sec // 5" "$SPEC")
@@ -52,15 +68,51 @@ for ((i=0; i < gate_count; i++)); do
   esac
 
   sleep "$pre_sec"
-  # AskUserQuestion UI: options are numbered; sending the index then Enter selects it.
-  tmux send-keys -t "$TMUX_TARGET" "$answer_index"
-  sleep 1
+  local steps=$(( answer_index - 1 ))
+  if (( steps > 0 )); then
+    for ((s=0; s<steps; s++)); do
+      tmux send-keys -t "$TMUX_TARGET" Down
+      sleep 0.2
+    done
+  fi
   tmux send-keys -t "$TMUX_TARGET" Enter
   sleep "$post_sec"
 
   touch "$(sentinel_path "gate-${i}-passed")"
+}
+
+for cmd in "${COMMANDS[@]}"; do
+  if [[ "$cmd" == "null" || -z "$cmd" ]]; then
+    echo "driver: skipping empty/null command" >&2
+    continue
+  fi
+  paste_into "$cmd"
+
+  # Consume gates targeted at this command (or all remaining if no targeting).
+  while (( gate_idx < GATE_COUNT )); do
+    target=$(jq -r ".gates[$gate_idx].for_command // null" "$SPEC")
+    if [[ "$target" != "null" && "$target" != "$cmd" ]]; then
+      break
+    fi
+    answer_gate "$gate_idx"
+    gate_idx=$(( gate_idx + 1 ))
+  done
+
+  sentinel_wait_idle "$IDLE_SECONDS"
 done
 
-# 3. Wait for final idle.
-sentinel_wait_idle "$IDLE_SECONDS"
 touch "$(sentinel_path agent-done)"
+
+# Send exit so the agent pane dies — otherwise pane_dead never becomes 1 and
+# the watcher / asciinema spin forever. Try /exit first; fall back to C-c x2
+# + C-d for builds that don't recognise the slash command.
+sleep 1
+tmux send-keys -t "$TMUX_TARGET" "/exit" Enter
+sleep 2
+if [[ "$(tmux display-message -p -t "$TMUX_TARGET" '#{pane_dead}' 2>/dev/null)" != "1" ]]; then
+  tmux send-keys -t "$TMUX_TARGET" C-c
+  sleep 1
+  tmux send-keys -t "$TMUX_TARGET" C-c
+  sleep 1
+  tmux send-keys -t "$TMUX_TARGET" C-d
+fi

@@ -7,11 +7,11 @@ Hook-driven coordination, no TUI scraping. See [`docs/design.md`](docs/design.md
 
 ```bash
 # 1. Write a spec (declarative tutorial description)
-cp tools/tutorial-rig/examples/single-pane.json my-tutorial.json
+cp examples/single-pane.json my-tutorial.json
 $EDITOR my-tutorial.json
 
 # 2. Record
-tools/tutorial-rig/bin/record.sh my-tutorial.json
+bin/record.sh my-tutorial.json
 
 # Outputs:
 #   /tmp/<session>.cast   (lossless asciinema cast)
@@ -20,18 +20,25 @@ tools/tutorial-rig/bin/record.sh my-tutorial.json
 
 ## What the rig gives you
 
-- **Hook-driven coordination.** A generated `--settings` file installs three lifecycle hooks
-  (`UserPromptSubmit`, `Stop`, `PostToolUse`) that drop sentinel files. The driver watches
-  sentinels, not pane text.
+- **Hook-driven coordination.** A generated `--settings` file installs lifecycle hooks
+  (`UserPromptSubmit`, `Stop`, `PreToolUse[AskUserQuestion]`, `PostToolUse`, `SessionStart`)
+  that drop sentinel files. The driver watches sentinels, not pane text.
 - **Multi-turn idle detection.** The `Stop` hook touches a `turn-end` sentinel every turn.
   Idle = mtime hasn't moved for N seconds. Works uniformly for single-turn and multi-turn flows.
+- **Multi-command tutorials.** `agent.commands[]` runs commands in sequence; gates can target
+  specific commands via `gates[].for_command`.
 - **Reliable gate handling.** `AskUserQuestion` gates are handled by ordered gate decisions in
-  the spec. The driver pastes the chosen option index via `tmux paste-buffer`, holds for
-  pre/post-Enter seconds for readability.
+  the spec. The driver navigates to option N via (N−1) `Down` keypresses then `Enter`, holding
+  for pre/post-Enter seconds for readability.
+- **Autonomous termination.** Driver sends `/exit` (falling back to `C-c` + `C-d`) when work is
+  done so the tmux pane dies, asciinema returns, and the recording completes without manual
+  intervention. A backstop in `record.sh` also kills the session once the `agent-done` sentinel
+  has been present long enough.
 - **Two-pane lockstep (optional).** A companion pane can subscribe to backend state via
   sentinels emitted by the agent's `PostToolUse` hook. One drives, the other observes.
-- **Validation gate.** Before rendering the GIF, parse the cast for required positive signals
-  and forbidden failure markers. Refuse to render on mismatch (override with `SKIP_VALIDATE=1`).
+- **Validation gate.** Before rendering the GIF, parse the cast (ANSI/CSI escapes stripped) for
+  required positive signals, optional in-order signals, and forbidden failure markers. Refuse
+  to render on mismatch (override with `SKIP_VALIDATE=1`).
 
 ## Spec format
 
@@ -39,12 +46,18 @@ A tutorial is one JSON file. Fields:
 
 ```jsonc
 {
-  "session": "my-tutorial",            // ${SESSION} for sentinels; auto-generated if absent
+  "session": "my-tutorial",            // [A-Za-z0-9._-]+; auto-generated if absent
+
   "agent": {
-    "command": "/my-skill arg1 arg2",  // slash command (or prose) pasted into the agent pane
-    "cwd": ".",                        // working dir for `claude`; defaults to $PWD
-    "extra_args": []                   // extra args passed to `claude`
+    // Either:
+    "command": "/my-skill arg1",       // single slash command (or prose)
+    // Or:
+    "commands": ["/cmd-a", "/cmd-b"],  // sequence of commands across turns
+    "cwd": ".",                        // working dir for `claude`; resolved to absolute path
+    "extra_args": [],                  // extra args passed to `claude`
+    "bypass_permissions": false        // pass --dangerously-skip-permissions
   },
+
   "hooks": {
     "capture_tools": [                 // PostToolUse matchers — each drops a sentinel
       {
@@ -54,44 +67,65 @@ A tutorial is one JSON file. Fields:
       }
     ]
   },
+
   "gates": [                           // ordered AskUserQuestion answers
-    { "wait_for": "turn-end-idle", "answer_index": 1, "pre_enter_sec": 5, "post_enter_sec": 2 },
-    { "wait_for": "turn-end-idle", "answer_index": 1 }
+    {
+      "wait_for": "gate-pending",      // "turn-end-idle" | "gate-pending" | "<sentinel-name>"
+      "answer_index": 1,               // 1-based option index; driver sends (N-1) Down + Enter
+      "pre_enter_sec": 5,              // hold before Enter (readability)
+      "post_enter_sec": 2,             // hold after Enter (resolution on camera)
+      "for_command": "/cmd-a"          // optional: only consume after this command
+    }
   ],
+
   "companion": {                       // optional second pane
     "command": "node my-observer.js",
     "wait_for_sentinels": ["project-id"],
-    "env": { "SUBSCRIBE_TO": "$project-id" }
+    "env": { "SUBSCRIBE_TO": "$project-id" }   // $name resolves /tmp/${SESSION}.name at spawn
   },
+
   "validate": {
-    "must_contain": ["Research complete", "Recommended:"],
-    "must_not_contain": ["step_aborted", "failure_reason", "Error:"]
+    "must_contain": ["Research complete"],
+    "must_contain_in_order": ["Phase 1", "Phase 2", "done"],   // optional ordering check
+    "must_not_contain": ["step_aborted", "failure_reason"]     // defaulted if absent
   },
+
   "pacing": {
     "idle_seconds": 8,                 // Stop-mtime idle threshold
-    "agg_idle_time_limit": 4,          // GIF-only silence cap
+    "attach_gap_sec": 3,               // wait after asciinema start before driver pastes
+    "agent_done_hold_sec": 4,          // kill-session backstop after agent-done
     "exit_hold_sec": 8,                // hold final frame before kill-session
     "tmux_size": "180x50"
+  },
+
+  "render": {                          // agg styling
+    "font_size": 22,
+    "line_height": 1.3,
+    "theme": "monokai"
   }
 }
 ```
 
-Only `agent.command` is required. Everything else has sane defaults.
+Only `agent.command` or `agent.commands[0]` is required; everything else has sane defaults.
+Preflight (in `record.sh`) rejects: bad SESSION characters, missing commands, and any
+`companion.env` `$sentinel` reference not listed in `companion.wait_for_sentinels`.
 
 ## Architecture
 
 ```
-record.sh                                                        // entry point
-  ├─ render hooks.json from hooks.json.tmpl (substitute __SESSION__, capture_tools)
-  ├─ clear /tmp/${SESSION}.* sentinels
-  ├─ tmux-session.sh   // spawn tmux, optionally split for companion pane
-  │     ├─ pane 0: claude --settings=<rendered-hooks> ...
-  │     └─ pane 1: <companion command>   (optional)
-  ├─ asciinema rec wrapping `tmux attach`
-  ├─ driver.sh         // paste command, then for each gate: wait_for + press Enter
-  ├─ pane-dead watcher // kill-session after exit_hold_sec
-  ├─ validate.mjs      // pass/fail the cast
-  └─ agg               // render GIF iff validation passes
+record.sh                                              // entry point
+  ├─ preflight (tools, spec sanity, env↔wait coherence)
+  ├─ render-hooks.sh   // spec → claude --settings file (jq, no sed on JSON body)
+  ├─ sentinel_clear_all
+  ├─ tmux-session.sh   // spawn detached tmux, optional split for companion pane
+  │     ├─ pane 0: claude --settings=<rendered-hooks> [--dangerously-skip-permissions]
+  │     └─ pane 1: <companion command, env sourced from /tmp/${SESSION}.companion-env>
+  ├─ watcher (background) // exit on all-panes-dead OR agent-done + hold
+  ├─ asciinema rec (background, attached to session)
+  ├─ ATTACH_GAP_SEC sleep so asciinema is capturing before the first keystroke
+  ├─ driver.sh         // paste each command, navigate gates, send /exit
+  ├─ validate.mjs      // strip ANSI, check must_contain + order + must_not_contain
+  └─ agg               // render GIF iff validation passes (params from spec.render)
 ```
 
 ## Prerequisites

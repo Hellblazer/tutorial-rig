@@ -2,11 +2,25 @@
 # Sentinel-file helpers. Sourced by other scripts.
 # All sentinels live at /tmp/${SESSION}.<suffix>.
 
+_require_session() {
+  if [[ -z "${SESSION:-}" ]]; then
+    echo "sentinels: SESSION is empty or unset" >&2
+    return 1
+  fi
+  # Reject anything that could escape the /tmp/ prefix or inject shell metas.
+  if [[ "$SESSION" =~ [^A-Za-z0-9._-] ]]; then
+    echo "sentinels: SESSION contains forbidden characters: $SESSION" >&2
+    return 1
+  fi
+}
+
 sentinel_path() {
+  _require_session || return 1
   printf '/tmp/%s.%s' "$SESSION" "$1"
 }
 
 sentinel_clear_all() {
+  _require_session || return 1
   rm -f /tmp/"$SESSION".* 2>/dev/null || true
 }
 
