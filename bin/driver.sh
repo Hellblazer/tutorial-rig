@@ -32,7 +32,12 @@ sleep "$ATTACH_GAP_SEC"
 
 # Read commands. Backwards-compatible: agent.commands[] wins; agent.command is
 # treated as a one-element list.
-mapfile -t COMMANDS < <(jq -r '
+# Read into COMMANDS without mapfile/readarray (those require bash 4+; macOS
+# ships /usr/bin/bash at 3.2).
+COMMANDS=()
+while IFS= read -r line; do
+  COMMANDS+=("$line")
+done < <(jq -r '
   .agent as $a
   | if ($a.commands // []) | length > 0 then $a.commands[]
     elif $a.command then $a.command
@@ -96,6 +101,12 @@ for cmd in "${COMMANDS[@]}"; do
     echo "driver: skipping empty/null command" >&2
     continue
   fi
+  # Remove any prior turn-end before pasting the next command. Otherwise the
+  # stale mtime from the previous command's Stop hook is already old enough
+  # to satisfy sentinel_wait_idle on the very first check, and we mark the
+  # new command 'done' before claude has even processed it. Critical for
+  # multi-command (agent.commands[]) flows.
+  rm -f "$(sentinel_path turn-end)" 2>/dev/null || true
   paste_into "$cmd"
 
   # Consume gates targeted at this command (or all remaining if no targeting).

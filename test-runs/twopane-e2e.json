@@ -23,7 +23,12 @@
     "env": { "JOB_ID": "$job-id" }
   },
   "validate": {
-    "must_contain": ["AGENT_DONE", "watching JOB_ID=demo-job-99", "job complete: demo-job-99"],
+    "must_contain_in_order": [
+      "[observer] watching JOB_ID=demo-job-99",
+      "[observer] tick 1 for demo-job-99",
+      "[observer] tick 2 for demo-job-99",
+      "[observer] job complete: demo-job-99"
+    ],
     "must_not_contain": ["step_aborted", "failure_reason", "<unset>"]
   },
   "pacing": {

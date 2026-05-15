@@ -1,7 +1,7 @@
 {
   "session": "gated-e2e",
   "agent": {
-    "command": "Call the AskUserQuestion tool exactly once with question 'Which fruit?' and options ['Apple', 'Banana', 'Cherry']. After receiving the user's answer, reply with exactly one line: PICKED=<answer>. Do not call AskUserQuestion again. Do not call any other tool.",
+    "command": "Call the AskUserQuestion tool exactly once with question 'Pick one' and options ['Alpha', 'Bravo', 'Charlie']. After receiving the user's selection, reply with exactly one line: VERDICT-9F2K=<selection>. Use that exact prefix VERDICT-9F2K — it must appear verbatim in your reply. Do not call any other tool.",
     "cwd": "/tmp",
     "bypass_permissions": true,
     "extra_args": ["--model", "sonnet"]
@@ -16,8 +16,8 @@
     }
   ],
   "validate": {
-    "must_contain": ["PICKED=", "Banana"],
-    "must_not_contain": ["step_aborted", "failure_reason"]
+    "must_contain": ["VERDICT-9F2K=Bravo"],
+    "must_not_contain": ["step_aborted", "failure_reason", "VERDICT-9F2K=Alpha", "VERDICT-9F2K=Charlie"]
   },
   "pacing": {
     "idle_seconds": 8,

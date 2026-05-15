@@ -1,7 +1,7 @@
 {
   "session": "e2e-test",
   "agent": {
-    "command": "What is 6 times 7? Reply with exactly: ANSWER=42",
+    "command": "Compute 17 plus 26 and reply with exactly one line in the form: NUM=<answer>. Show only that line.",
     "cwd": "/tmp",
     "bypass_permissions": true,
     "extra_args": ["--model", "haiku"]
@@ -9,7 +9,7 @@
   "hooks": { "capture_tools": [] },
   "gates": [],
   "validate": {
-    "must_contain": ["ANSWER=42"],
+    "must_contain": ["NUM=43"],
     "must_not_contain": ["step_aborted", "failure_reason"]
   },
   "pacing": {

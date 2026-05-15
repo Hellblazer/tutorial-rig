@@ -8,6 +8,20 @@ set -euo pipefail
 SPEC="$1"
 HOOKS="$2"
 : "${SESSION:?SESSION required}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1091
+source "$HERE/lib/sentinels.sh"
+
+# Validate every spec-provided string that gets interpolated into shell.
+while IFS= read -r sent; do
+  [[ -z "$sent" ]] && continue
+  rig_check_identifier "companion.wait_for_sentinels[]" "$sent" || exit 2
+done < <(jq -r '.companion.wait_for_sentinels // [] | .[]' "$SPEC")
+while IFS= read -r k; do
+  [[ -z "$k" ]] && continue
+  # Env keys must be valid POSIX identifiers (no dots/dashes — different from sentinel rules).
+  rig_check_identifier "companion.env key" "$k" '^[A-Za-z_][A-Za-z0-9_]*$' || exit 2
+done < <(jq -r '.companion.env // {} | keys[]' "$SPEC")
 
 tmux_size=$(jq -r '.pacing.tmux_size // "180x50"' "$SPEC")
 cols="${tmux_size%x*}"; rows="${tmux_size#*x}"

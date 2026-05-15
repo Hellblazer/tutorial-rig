@@ -11,6 +11,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/lib/sentinels.sh"
 
+# Bash 4+ required (the driver and tmux-session use array idioms / read loops
+# that work on bash 3.2 too, but `read -t`, `wait -n`, and a few other 4+
+# features may be added later; fail loudly now rather than half-silently).
+if (( BASH_VERSINFO[0] < 4 )); then
+  echo "record: bash 4+ required (have ${BASH_VERSION}); install via 'brew install bash' on macOS" >&2
+  exit 2
+fi
+
 # Resolve session name and validate format.
 SESSION="${SESSION:-$(jq -r '.session // empty' "$SPEC")}"
 if [[ -z "$SESSION" ]]; then
@@ -27,14 +35,16 @@ GIF_OUT="${GIF_OUT:-/tmp/${SESSION}.gif}"
 HOOKS_RENDERED="/tmp/${SESSION}.hooks.json"
 
 IDLE_SECONDS=$(jq -r '.pacing.idle_seconds // 8' "$SPEC")
-AGG_IDLE=$(jq -r '.pacing.agg_idle_time_limit // 4' "$SPEC")
 EXIT_HOLD=$(jq -r '.pacing.exit_hold_sec // 8' "$SPEC")
 ATTACH_GAP_SEC="${ATTACH_GAP_SEC:-$(jq -r '.pacing.attach_gap_sec // 3' "$SPEC")}"
 AGENT_DONE_HOLD=$(jq -r '.pacing.agent_done_hold_sec // 4' "$SPEC")
 TURN_TIMEOUT_SEC=$(jq -r '.pacing.turn_timeout_sec // 120' "$SPEC")
 SESSION_MAX_SEC=$(jq -r '.pacing.session_max_sec // 1800' "$SPEC")
 
-# Render-block (overrideable styling for agg).
+# Render-block (overrideable styling for agg). idle_time_limit is a render
+# concern (GIF playback pacing), so it lives under .render — but we still
+# accept .pacing.agg_idle_time_limit for backwards compatibility.
+AGG_IDLE=$(jq -r '.render.idle_time_limit // .pacing.agg_idle_time_limit // 4' "$SPEC")
 AGG_FONT_SIZE=$(jq -r '.render.font_size // 22' "$SPEC")
 AGG_LINE_HEIGHT=$(jq -r '.render.line_height // 1.3' "$SPEC")
 AGG_THEME=$(jq -r '.render.theme // "monokai"' "$SPEC")
@@ -68,6 +78,22 @@ if [[ -n "$missing_waits" ]]; then
   exit 2
 fi
 
+# Preflight: validate every spec-provided identifier that flows into shell.
+# (render-hooks.sh and tmux-session.sh each re-validate their own slice; this
+# is the first-failure-fast layer that produces a clear preflight error.)
+while IFS= read -r name; do
+  [[ -z "$name" ]] && continue
+  rig_check_identifier "hooks.capture_tools[].name" "$name" || exit 2
+done < <(jq -r '(.hooks.capture_tools // []) | .[] | .name // ""' "$SPEC")
+while IFS= read -r sent; do
+  [[ -z "$sent" ]] && continue
+  rig_check_identifier "companion.wait_for_sentinels[]" "$sent" || exit 2
+done < <(jq -r '.companion.wait_for_sentinels // [] | .[]' "$SPEC")
+while IFS= read -r k; do
+  [[ -z "$k" ]] && continue
+  rig_check_identifier "companion.env key" "$k" '^[A-Za-z_][A-Za-z0-9_]*$' || exit 2
+done < <(jq -r '.companion.env // {} | keys[]' "$SPEC")
+
 echo "[rig] session=$SESSION cast=$CAST_OUT gif=$GIF_OUT"
 
 # Refuse to run if the spec path lives in the sentinel glob.
@@ -90,6 +116,10 @@ cleanup() {
     [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
   done
   tmux kill-session -t "$SESSION" 2>/dev/null || true
+  # The consent-sweep aux session lives outside the main SESSION; kill it
+  # too so a signal during the 25s sweep loop doesn't orphan an interactive
+  # claude process.
+  tmux kill-session -t "${SESSION}-warmup" 2>/dev/null || true
   return $rc
 }
 trap cleanup EXIT INT TERM
@@ -134,7 +164,9 @@ consent_sweep() {
       continue
     fi
     # Normal prompt visible → consent has been cleared (or was never asked).
-    if echo "$pane" | grep -qE "bypass permissions on|cycle\)|Welcome back"; then
+    # Match both bypass-mode signals AND a generic prompt-ready marker (the
+    # claude version banner) so non-bypass recordings also break out cleanly.
+    if echo "$pane" | grep -qE "bypass permissions on|cycle\)|Welcome back|Claude Code v[0-9]"; then
       break
     fi
   done
@@ -144,6 +176,15 @@ consent_sweep() {
   tmux kill-session -t "$aux" 2>/dev/null || true
   echo "[rig] consent-sweep done (legal=$accepted_legal trust=$accepted_trust)"
 }
+
+# Refuse if another rig run owns this SESSION's tmux session. tmux-session.sh
+# would otherwise kill-session the live one, corrupting both runs. Check
+# BEFORE the consent sweep so a conflicting session aborts cheaply.
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  echo "record: tmux session '$SESSION' already exists — another rig instance may be running" >&2
+  echo "  (kill it with: tmux kill-session -t $SESSION)" >&2
+  exit 2
+fi
 
 if [[ "${SKIP_CONSENT_SWEEP:-0}" != "1" ]]; then
   consent_sweep

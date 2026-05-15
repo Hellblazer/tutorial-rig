@@ -2,6 +2,25 @@
 # Sentinel-file helpers. Sourced by other scripts.
 # All sentinels live at /tmp/${SESSION}.<suffix>.
 
+# Validate that a spec-provided string is safe to interpolate into shell.
+# Sentinel names, capture-tool names, and companion env keys are all written
+# into rendered hook commands and sourced envfiles; without validation, a
+# malicious spec value executes arbitrary code.
+#
+# Usage: rig_check_identifier "<label>" "<value>" ["<regex>"]
+# Default regex: [A-Za-z0-9._-]+
+rig_check_identifier() {
+  local label="$1" value="$2" pattern="${3:-^[A-Za-z0-9._-]+$}"
+  if [[ -z "$value" ]]; then
+    echo "$label: must be non-empty" >&2
+    return 1
+  fi
+  if [[ ! "$value" =~ $pattern ]]; then
+    echo "$label: invalid (must match $pattern): $value" >&2
+    return 1
+  fi
+}
+
 _require_session() {
   if [[ -z "${SESSION:-}" ]]; then
     echo "sentinels: SESSION is empty or unset" >&2

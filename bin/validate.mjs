@@ -43,26 +43,43 @@ for (let i = 1; i < raw.length; i++) {
   }
 }
 
-// Strip ANSI/CSI escapes and other terminal-control noise so visible strings
-// aren't split by cursor-movement codes. Pragmatic, not a full emulator —
-// covers colours, cursor positioning, alternate-screen toggles, CRs, BSs.
-function stripAnsi(s) {
-  return s
+// Strip ANSI/CSI/OSC escapes, then APPLY backspaces (they delete the
+// preceding character — without this, "ERROR<BS><BS><BS><BS><BS>CLEAR"
+// would leave "ERROR" present and false-fail must_not_contain).
+// Pragmatic, not a full emulator: handles colours, cursor positioning,
+// alternate-screen toggles, CRs, BS char-deletion. Does NOT replay
+// cursor movements or wraparound (documented in design.md).
+function cleanCast(s) {
+  const escStripped = s
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")           // CSI
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "") // OSC
     .replace(/\x1b[@-_]/g, "")                          // single-char ESC
     .replace(/\x1b./g, "")                              // any remaining ESC seq
-    .replace(/\r/g, "")
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");
+    .replace(/\r/g, "");
+  // Apply \x08 (backspace) destructively: each BS removes the preceding char.
+  const out = [];
+  for (const ch of escStripped) {
+    if (ch === "\x08") {
+      if (out.length > 0) out.pop();
+    } else {
+      out.push(ch);
+    }
+  }
+  // Strip remaining low control chars (preserve \t=09 and \n=0a).
+  return out.join("").replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");
 }
 
-const cleaned = stripAnsi(output);
+const cleaned = cleanCast(output);
 
 const missing = must.filter((s) => !cleaned.includes(s));
 const present = mustNot.filter((s) => cleaned.includes(s));
 
 let orderViolation = null;
 if (mustInOrder.length > 0) {
+  // Cursor semantics: each needle must START strictly after the previous
+  // needle's START position. This permits overlapping needles (e.g.
+  // ["ab","bc"] in "abc") while still enforcing order — needed for cases
+  // where the asserted strings share a suffix/prefix.
   let cursor = 0;
   for (const needle of mustInOrder) {
     const idx = cleaned.indexOf(needle, cursor);
@@ -70,7 +87,7 @@ if (mustInOrder.length > 0) {
       orderViolation = `'${needle}' missing or out of order after position ${cursor}`;
       break;
     }
-    cursor = idx + needle.length;
+    cursor = idx + 1;
   }
 }
 
