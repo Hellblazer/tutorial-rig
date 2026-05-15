@@ -10,6 +10,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/lib/sentinels.sh"
 
+RIG_TMUX_SOCKET="${RIG_TMUX_SOCKET:-recording-rig}"
+tmux() { command tmux -L "$RIG_TMUX_SOCKET" "$@"; }
+
 : "${SESSION:?SESSION required}"
 : "${TMUX_TARGET:?TMUX_TARGET required (e.g. tutorial:0.0)}"
 IDLE_SECONDS="${IDLE_SECONDS:-8}"

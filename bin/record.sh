@@ -11,6 +11,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/lib/sentinels.sh"
 
+# Dedicated tmux socket so the rig (a) doesn't pollute the user's normal
+# tmux server, and (b) can be invoked inside an existing tmux session
+# (e.g. when recording the rig itself). All sub-scripts inherit this override.
+export RIG_TMUX_SOCKET="${RIG_TMUX_SOCKET:-recording-rig}"
+tmux() { command tmux -L "$RIG_TMUX_SOCKET" "$@"; }
+export -f tmux
+
 # Bash 4+ required (the driver and tmux-session use array idioms / read loops
 # that work on bash 3.2 too, but `read -t`, `wait -n`, and a few other 4+
 # features may be added later; fail loudly now rather than half-silently).
@@ -235,7 +242,7 @@ WATCHER_PID=$!
 # Start asciinema first so it's capturing before the driver's first keystroke.
 asciinema rec --overwrite --quiet \
   --output-format asciicast-v2 \
-  --command "tmux attach -t $SESSION" \
+  --command "tmux -L $RIG_TMUX_SOCKET attach -t $SESSION" \
   "$CAST_OUT" &
 ASCIINEMA_PID=$!
 

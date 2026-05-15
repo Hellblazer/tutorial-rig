@@ -1,8 +1,21 @@
-# Deterministic recording rig for Claude Code tutorials
+# Deterministic recording rig for Claude Code sessions
 
-A reproducible pipeline for capturing scripted, end-to-end tutorial recordings driven by Claude Code. The recording technology itself (tmux + asciinema + agg) is the boring part. The load-bearing innovation is using Claude Code's **lifecycle hooks** as the coordination backbone instead of scraping the TUI for state.
+A reproducible pipeline for capturing scripted, end-to-end recordings driven by Claude Code (tutorials, demos, screencasts, regression fixtures — anything you want repeatable). The recording technology itself (tmux + asciinema + agg) is the boring part. The load-bearing innovation is using Claude Code's **lifecycle hooks** as the coordination backbone instead of scraping the TUI for state.
 
 This document is the green-field design. It supersedes prior tutorial-pipeline notes and assumes nothing about previous attempts.
+
+## Process model
+
+The rig uses a **dedicated tmux socket** (`tmux -L recording-rig`) for every session it spawns. This means:
+
+- The rig never collides with the user's normal tmux server (`tmux ls` stays clean during recordings).
+- The rig can be invoked from inside an existing tmux session — including, in principle, recording itself.
+
+The rig also supports **sandbox-HOME isolation** for the recorded child session: set `HOME` to a tmpdir with selective symlinks back to `~/.claude/` (everything except `plugins/`, `skills/`, `agents/`, and `CLAUDE.md`), and the recorded claude only sees plugins loaded explicitly via `--plugin-dir`. Useful for "clean tutorials" where you don't want the user's ambient extensions visible in the GIF. See `test-runs/meta-rig-runner.sh` for the symlink layout.
+
+### One caveat about nesting
+
+Direct rig invocation under sandbox HOME works end-to-end. **However**, invoking the rig from inside another `claude` session's `Bash` tool currently does not complete: `asciinema rec` requires a PTY, and the Bash tool runs commands without a controlling terminal. The `script -q /dev/null bash ...` wrapper partially helps but doesn't fully resolve it. This means a tutorial about the rig itself, recorded by the rig, requires the recorded session to invoke `/recording-rig:record` via a slash-command-and-skill path that ultimately runs in a tmux-allocated PTY, not via the Bash tool subprocess. Future work.
 
 ## Core insight: hooks, not TUI scraping
 

@@ -12,6 +12,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$HERE/lib/sentinels.sh"
 
+# tmux socket isolation — inherits RIG_TMUX_SOCKET from record.sh.
+RIG_TMUX_SOCKET="${RIG_TMUX_SOCKET:-recording-rig}"
+tmux() { command tmux -L "$RIG_TMUX_SOCKET" "$@"; }
+
 # Validate every spec-provided string that gets interpolated into shell.
 while IFS= read -r sent; do
   [[ -z "$sent" ]] && continue

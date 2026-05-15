@@ -51,15 +51,16 @@ if command -v claude >/dev/null 2>&1; then
   fi
 fi
 
-# 5. tmux can spawn detached
+# 5. tmux can spawn detached on the rig's dedicated socket
+RIG_TMUX_SOCKET="${RIG_TMUX_SOCKET:-recording-rig}"
 if command -v tmux >/dev/null 2>&1; then
   s="rig-doctor-$$"
-  if tmux new-session -d -s "$s" 'sleep 1' 2>/dev/null; then
-    ok "tmux new-session works"
-    tmux kill-session -t "$s" 2>/dev/null || true
+  if tmux -L "$RIG_TMUX_SOCKET" new-session -d -s "$s" 'sleep 1' 2>/dev/null; then
+    ok "tmux new-session on socket '$RIG_TMUX_SOCKET' works"
+    tmux -L "$RIG_TMUX_SOCKET" kill-session -t "$s" 2>/dev/null || true
   else
-    bad "tmux new-session failed"
-    hint "check ~/.tmux.conf for syntax errors; try: tmux -f /dev/null new-session -d -s test"
+    bad "tmux new-session failed on socket '$RIG_TMUX_SOCKET'"
+    hint "check ~/.tmux.conf for syntax errors; try: tmux -L $RIG_TMUX_SOCKET -f /dev/null new-session -d -s test"
   fi
 fi
 

@@ -1,16 +1,11 @@
 {
   "name": "recording-rig",
   "version": "0.1.0",
-  "description": "Hook-driven framework for recording deterministic Claude Code sessions. Drives an isolated child claude instance under tmux + asciinema + agg, coordinates via lifecycle hook sentinels (no TUI scraping), validates the cast, renders a GIF.",
+  "description": "Hook-driven framework for recording deterministic Claude Code sessions (tutorials, demos, screencasts, fixtures). Drives an isolated child claude under tmux + asciinema + agg, coordinates via lifecycle-hook sentinels (no TUI scraping), validates the cast, renders a GIF.",
   "author": {
     "name": "Hal Hildebrand",
-    "email": "hal.hildebrand@me.com",
     "url": "https://github.com/Hellblazer"
   },
-  "license": "AGPL-3.0-or-later",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Hellblazer/recording-rig"
-  },
-  "keywords": ["recording", "tutorial", "demo", "screencast", "tmux", "asciinema", "agg"]
+  "repository": "https://github.com/Hellblazer/recording-rig",
+  "license": "AGPL-3.0-or-later"
 }

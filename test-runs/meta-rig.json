@@ -1,0 +1,34 @@
+{
+  "session": "meta-rig",
+  "agent": {
+    "command": "Run exactly this bash command (the script wrapper allocates a PTY which asciinema needs): script -q /dev/null bash /Users/hal.hildebrand/git/recording-rig/bin/record.sh /Users/hal.hildebrand/git/recording-rig/test-runs/inner-spec.json -- and report the exit code plus the 'gif rendered:' line from the output. Do not run any other tools or commands.",
+    "cwd": "/tmp",
+    "bypass_permissions": true,
+    "extra_args": [
+      "--model", "sonnet",
+      "--plugin-dir", "/Users/hal.hildebrand/git/recording-rig"
+    ]
+  },
+  "hooks": { "capture_tools": [] },
+  "gates": [],
+  "validate": {
+    "must_contain_in_order": [
+      "consent-sweep done",
+      "hooks rendered ->",
+      "tmux session up; agent pane =",
+      "cast captured:",
+      "[validate] PASSED",
+      "gif rendered:"
+    ],
+    "must_not_contain": ["step_aborted", "failure_reason", "validation failed"]
+  },
+  "pacing": {
+    "idle_seconds": 12,
+    "turn_timeout_sec": 300,
+    "attach_gap_sec": 10,
+    "agent_done_hold_sec": 8,
+    "exit_hold_sec": 8,
+    "tmux_size": "220x60"
+  },
+  "render": { "font_size": 16, "theme": "monokai" }
+}
