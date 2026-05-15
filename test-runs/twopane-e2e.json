@@ -1,0 +1,38 @@
+{
+  "session": "twopane-e2e",
+  "agent": {
+    "command": "Use the Bash tool to execute exactly this command: echo JOB_ID=demo-job-99 — then reply with one line: AGENT_DONE. Do not run any other Bash command.",
+    "cwd": "/tmp",
+    "bypass_permissions": true,
+    "extra_args": ["--model", "sonnet"]
+  },
+  "hooks": {
+    "capture_tools": [
+      {
+        "name": "job-id",
+        "matcher": "^Bash$",
+        "jq": ".stdout | ltrimstr(\"JOB_ID=\") | rtrimstr(\"\\n\")"
+      }
+    ]
+  },
+  "gates": [],
+  "companion": {
+    "command": "node",
+    "args": ["/Users/hal.hildebrand/git/tutorial-rig/test-runs/observer.mjs"],
+    "wait_for_sentinels": ["job-id"],
+    "env": { "JOB_ID": "$job-id" }
+  },
+  "validate": {
+    "must_contain": ["AGENT_DONE", "watching JOB_ID=demo-job-99", "job complete: demo-job-99"],
+    "must_not_contain": ["step_aborted", "failure_reason", "<unset>"]
+  },
+  "pacing": {
+    "idle_seconds": 8,
+    "turn_timeout_sec": 180,
+    "attach_gap_sec": 8,
+    "agent_done_hold_sec": 6,
+    "exit_hold_sec": 6,
+    "tmux_size": "220x50"
+  },
+  "render": { "font_size": 18, "theme": "monokai" }
+}

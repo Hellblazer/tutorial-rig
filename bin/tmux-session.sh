@@ -60,13 +60,16 @@ if [[ -n "$companion_cmd" ]]; then
   done < <(jq -r '.companion.wait_for_sentinels // [] | .[]' "$SPEC")
 
   resolve_env=""
+  # NOTE: $(...) command substitution strips trailing newlines, so we cannot
+  # rely on printf '...\n' inside the substitution. Append a literal $'\n'
+  # outside the substitution after each block.
   while IFS=$'\t' read -r k v; do
     [[ -z "$k" ]] && continue
     if [[ "$v" == \$* ]]; then
       sent="${v#\$}"
-      resolve_env+="$(printf '%s=$(cat /tmp/%s.%s)\nexport %s\n' "$k" "$SESSION" "$sent" "$k")"
+      resolve_env+="$(printf '%s=$(cat /tmp/%s.%s)\nexport %s' "$k" "$SESSION" "$sent" "$k")"$'\n'
     else
-      resolve_env+="$(printf 'export %s=%q\n' "$k" "$v")"
+      resolve_env+="$(printf 'export %s=%q' "$k" "$v")"$'\n'
     fi
   done < <(jq -r '.companion.env // {} | to_entries[] | "\(.key)\t\(.value)"' "$SPEC")
 

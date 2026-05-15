@@ -1,0 +1,31 @@
+{
+  "session": "gated-e2e",
+  "agent": {
+    "command": "Call the AskUserQuestion tool exactly once with question 'Which fruit?' and options ['Apple', 'Banana', 'Cherry']. After receiving the user's answer, reply with exactly one line: PICKED=<answer>. Do not call AskUserQuestion again. Do not call any other tool.",
+    "cwd": "/tmp",
+    "bypass_permissions": true,
+    "extra_args": ["--model", "sonnet"]
+  },
+  "hooks": { "capture_tools": [] },
+  "gates": [
+    {
+      "wait_for": "gate-pending",
+      "answer_index": 2,
+      "pre_enter_sec": 5,
+      "post_enter_sec": 2
+    }
+  ],
+  "validate": {
+    "must_contain": ["PICKED=", "Banana"],
+    "must_not_contain": ["step_aborted", "failure_reason"]
+  },
+  "pacing": {
+    "idle_seconds": 8,
+    "turn_timeout_sec": 180,
+    "attach_gap_sec": 8,
+    "agent_done_hold_sec": 4,
+    "exit_hold_sec": 6,
+    "tmux_size": "180x50"
+  },
+  "render": { "font_size": 20, "theme": "monokai" }
+}

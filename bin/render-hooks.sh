@@ -14,6 +14,11 @@ if [[ ! "$SESSION" =~ ^[A-Za-z0-9._-]+$ ]]; then
 fi
 
 # Build the PostToolUse array from spec.hooks.capture_tools[].
+# tool_response shape varies by tool/transport:
+#   - HTTP-transport MCP: array of content blocks, [{type:"text", text:"<json>"}]
+#   - stdio-transport MCP: JSON-encoded string of the payload
+#   - native built-in tools (Bash, Write, AskUserQuestion, etc.): bare structured object
+# The unwrap pattern handles all three.
 capture_json=$(jq --arg sess "$SESSION" '
   (.hooks.capture_tools // []) as $caps
   | [ $caps[] | {
@@ -21,7 +26,7 @@ capture_json=$(jq --arg sess "$SESSION" '
       hooks: [{
         type: "command",
         command: (
-          "jq -r '\''.tool_response | (if type==\"array\" then .[0].text else . end) | fromjson | ("
+          "jq -r '\''.tool_response | (if type==\"array\" then (.[0].text | fromjson) elif type==\"string\" then fromjson else . end) | ("
           + .jq
           + " // empty)'\'' | tr -d '\''\\n'\'' > /tmp/" + $sess + "." + .name
         )
