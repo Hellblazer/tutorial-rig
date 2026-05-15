@@ -4,15 +4,33 @@ A reusable, language-agnostic framework for recording deterministic Claude Code 
 tutorials, demos, screencasts, regression fixtures, anything you want repeatable.
 Hook-driven coordination, no TUI scraping. See [`docs/design.md`](docs/design.md) for the rationale.
 
-## Quick start
+## Quick start — as a Claude Code plugin
+
+This repo is also a Claude Code plugin. Install it once and the rig becomes available
+as skills and slash commands in any project:
+
+```
+/recording-rig:doctor                 verify prereqs
+/recording-rig:author [out.json]      interactively author a spec
+/recording-rig:record path/spec.json  run a recording
+/recording-rig:diagnose <session>     forensics on a failed run
+```
+
+The skills (`record`, `author-spec`, `doctor`, `diagnose`) also trigger on natural prose
+like "make a gif of this skill" or "diagnose my failed rig run".
+
+## Quick start — as standalone scripts
 
 ```bash
-# 1. Write a spec (declarative tutorial description)
-cp examples/single-pane.json my-tutorial.json
-$EDITOR my-tutorial.json
+# 1. Verify prereqs
+bin/doctor.sh
 
-# 2. Record
-bin/record.sh my-tutorial.json
+# 2. Write a spec
+cp examples/single-pane.json my-recording.json
+$EDITOR my-recording.json
+
+# 3. Record
+bin/record.sh my-recording.json
 
 # Outputs:
 #   /tmp/<session>.cast   (lossless asciinema cast)

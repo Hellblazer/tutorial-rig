@@ -1,0 +1,28 @@
+{
+  "session": "multicmd-e2e",
+  "agent": {
+    "commands": [
+      "Compute 5 plus 7. Reply with exactly one line: STEP1-NUM=<answer>. Show only that line.",
+      "Compute 11 times 9. Reply with exactly one line: STEP2-NUM=<answer>. Show only that line.",
+      "Compute 100 minus 33. Reply with exactly one line: STEP3-NUM=<answer>. Show only that line."
+    ],
+    "cwd": "/tmp",
+    "bypass_permissions": true,
+    "extra_args": ["--model", "haiku"]
+  },
+  "hooks": { "capture_tools": [] },
+  "gates": [],
+  "validate": {
+    "must_contain_in_order": ["STEP1-NUM=12", "STEP2-NUM=99", "STEP3-NUM=67"],
+    "must_not_contain": ["step_aborted", "failure_reason"]
+  },
+  "pacing": {
+    "idle_seconds": 6,
+    "turn_timeout_sec": 90,
+    "attach_gap_sec": 8,
+    "agent_done_hold_sec": 4,
+    "exit_hold_sec": 4,
+    "tmux_size": "180x50"
+  },
+  "render": { "font_size": 20, "theme": "monokai" }
+}
