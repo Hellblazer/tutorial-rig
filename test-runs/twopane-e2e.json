@@ -18,7 +18,7 @@
   "gates": [],
   "companion": {
     "command": "node",
-    "args": ["/Users/hal.hildebrand/git/tutorial-rig/test-runs/observer.mjs"],
+    "args": ["/Users/hal.hildebrand/git/recording-rig/test-runs/observer.mjs"],
     "wait_for_sentinels": ["job-id"],
     "env": { "JOB_ID": "$job-id" }
   },

@@ -1,6 +1,7 @@
-# tutorial-rig
+# recording-rig
 
-A reusable, language-agnostic framework for recording deterministic Claude Code tutorials.
+A reusable, language-agnostic framework for recording deterministic Claude Code sessions —
+tutorials, demos, screencasts, regression fixtures, anything you want repeatable.
 Hook-driven coordination, no TUI scraping. See [`docs/design.md`](docs/design.md) for the rationale.
 
 ## Quick start
