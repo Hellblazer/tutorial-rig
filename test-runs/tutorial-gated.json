@@ -1,0 +1,31 @@
+{
+  "session": "tutorial-gated",
+  "agent": {
+    "command": "We are recording a tutorial that demonstrates the AskUserQuestion gate flow. Call the AskUserQuestion tool exactly once with question 'Which environment do you want to deploy to?' and options ['production', 'staging', 'dev']. After receiving the user's selection, reply with exactly one line in the form: DEPLOY_TARGET-K7Q=<selection>. Use that exact prefix verbatim. Do not call any other tool. Do not add any other prose.",
+    "cwd": "/Users/hal.hildebrand/git/recording-rig",
+    "bypass_permissions": true,
+    "extra_args": ["--model", "sonnet"]
+  },
+  "hooks": { "capture_tools": [] },
+  "gates": [
+    {
+      "wait_for": "gate-pending",
+      "answer_index": 2,
+      "pre_enter_sec": 6,
+      "post_enter_sec": 3
+    }
+  ],
+  "validate": {
+    "must_contain": ["DEPLOY_TARGET-K7Q=staging"],
+    "must_not_contain": ["DEPLOY_TARGET-K7Q=production", "DEPLOY_TARGET-K7Q=dev"]
+  },
+  "pacing": {
+    "idle_seconds": 8,
+    "turn_timeout_sec": 180,
+    "attach_gap_sec": 8,
+    "agent_done_hold_sec": 4,
+    "exit_hold_sec": 6,
+    "tmux_size": "180x50"
+  },
+  "render": { "font_size": 18, "theme": "monokai" }
+}

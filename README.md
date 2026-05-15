@@ -6,7 +6,11 @@ Hook-driven coordination, no TUI scraping. See [`docs/design.md`](docs/design.md
 
 ![getting started](docs/assets/getting-started.gif)
 
-> *Tutorial recorded by the rig recording itself: agent runs `doctor.sh`, lists `examples/`, cats a spec. Spec at [`test-runs/tutorial-intro.json`](test-runs/tutorial-intro.json).*
+> *Getting started: agent runs `doctor.sh`, lists `examples/`, cats a spec. Spec at [`test-runs/tutorial-intro.json`](test-runs/tutorial-intro.json).*
+
+![gated path](docs/assets/gated.gif)
+
+> *Gated path: agent calls `AskUserQuestion` with three options ('production', 'staging', 'dev'); the rig auto-answers option 2 via Down + Enter; agent confirms `DEPLOY_TARGET-K7Q=staging`. Provability comes from `must_not_contain` blocking the other two answers. Spec at [`test-runs/tutorial-gated.json`](test-runs/tutorial-gated.json).*
 
 ## Quick start — as a Claude Code plugin
 
