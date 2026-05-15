@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Top-level entry point. Read a spec, drive a recording, validate, render GIF.
 # Usage: record.sh <spec.json>
-# Env overrides: SESSION, CAST_OUT, GIF_OUT, SKIP_VALIDATE, SKIP_GIF, ATTACH_GAP_SEC
+# Env overrides: SESSION, CAST_OUT, GIF_OUT, SKIP_VALIDATE, SKIP_GIF,
+#                ATTACH_GAP_SEC, SKIP_CONSENT_SWEEP
 set -euo pipefail
 
 SPEC_ARG="${1:?usage: record.sh <spec.json>}"
@@ -30,13 +31,15 @@ AGG_IDLE=$(jq -r '.pacing.agg_idle_time_limit // 4' "$SPEC")
 EXIT_HOLD=$(jq -r '.pacing.exit_hold_sec // 8' "$SPEC")
 ATTACH_GAP_SEC="${ATTACH_GAP_SEC:-$(jq -r '.pacing.attach_gap_sec // 3' "$SPEC")}"
 AGENT_DONE_HOLD=$(jq -r '.pacing.agent_done_hold_sec // 4' "$SPEC")
+TURN_TIMEOUT_SEC=$(jq -r '.pacing.turn_timeout_sec // 120' "$SPEC")
+SESSION_MAX_SEC=$(jq -r '.pacing.session_max_sec // 1800' "$SPEC")
 
 # Render-block (overrideable styling for agg).
 AGG_FONT_SIZE=$(jq -r '.render.font_size // 22' "$SPEC")
 AGG_LINE_HEIGHT=$(jq -r '.render.line_height // 1.3' "$SPEC")
 AGG_THEME=$(jq -r '.render.theme // "monokai"' "$SPEC")
 
-export IDLE_SECONDS ATTACH_GAP_SEC
+export IDLE_SECONDS ATTACH_GAP_SEC TURN_TIMEOUT_SEC SESSION_MAX_SEC
 
 # Preflight: tools.
 for bin in tmux jq asciinema agg claude node; do
@@ -67,8 +70,7 @@ fi
 
 echo "[rig] session=$SESSION cast=$CAST_OUT gif=$GIF_OUT"
 
-# Refuse to run if the spec path lives in the sentinel glob — sentinel_clear_all
-# would erase it. Same for the rendered-hooks output.
+# Refuse to run if the spec path lives in the sentinel glob.
 case "$SPEC" in
   /tmp/"$SESSION".*)
     echo "record: spec path $SPEC collides with sentinel glob /tmp/${SESSION}.* — move spec outside /tmp or rename" >&2
@@ -76,24 +78,97 @@ case "$SPEC" in
     ;;
 esac
 
-# Clear stale sentinels BEFORE writing any rig artifacts under /tmp/${SESSION}.*.
+# --- EXIT trap: kill background processes and tmux session on any exit path.
+# Declared here so it covers the consent-sweep below as well as the main flow.
+# Variables expand at trap-fire time, so empty (unset) values become no-ops.
+ASCIINEMA_PID=""
+DRIVER_PID=""
+WATCHER_PID=""
+cleanup() {
+  local rc=$?
+  for pid in "$DRIVER_PID" "$ASCIINEMA_PID" "$WATCHER_PID"; do
+    [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
+  done
+  tmux kill-session -t "$SESSION" 2>/dev/null || true
+  return $rc
+}
+trap cleanup EXIT INT TERM
+
+# --- Consent sweep: dismiss the two interactive Claude consent dialogs that
+# block SessionStart on first-run-per-machine and first-run-per-cwd. Runs in
+# an auxiliary tmux session (NOT the recorded one) and uses bounded, one-shot
+# screen-scrape — the only justified exception to the no-TUI-scraping rule.
+# Skip with SKIP_CONSENT_SWEEP=1.
+consent_sweep() {
+  local bypass; bypass=$(jq -r '.agent.bypass_permissions // false' "$SPEC")
+  local cwd_raw; cwd_raw=$(jq -r '.agent.cwd // "."' "$SPEC")
+  local cwd; cwd=$(cd "$cwd_raw" 2>/dev/null && pwd) || return 0
+  local aux="${SESSION}-warmup"
+  local claude_args=()
+  [[ "$bypass" == "true" ]] && claude_args+=(--dangerously-skip-permissions)
+  claude_args+=(--model haiku)
+
+  tmux kill-session -t "$aux" 2>/dev/null || true
+  tmux new-session -d -s "$aux" -x 120 -y 40 -c "$cwd" \
+    "claude $(printf '%q ' "${claude_args[@]}")"
+
+  local accepted_legal=0 accepted_trust=0
+  for ((i=0; i<25; i++)); do
+    sleep 1
+    local pane
+    pane=$(tmux capture-pane -t "$aux" -p 2>/dev/null || echo "")
+    if (( accepted_legal == 0 )) && echo "$pane" | grep -q "Yes, I accept"; then
+      # Layout: "1. No, exit / 2. Yes, I accept" — Down + Enter selects option 2.
+      tmux send-keys -t "$aux" Down
+      sleep 0.3
+      tmux send-keys -t "$aux" Enter
+      accepted_legal=1
+      sleep 2
+      continue
+    fi
+    if (( accepted_trust == 0 )) && echo "$pane" | grep -q "trust this folder"; then
+      # Layout: "1. Yes, I trust this folder / 2. No, exit" — Enter selects #1.
+      tmux send-keys -t "$aux" Enter
+      accepted_trust=1
+      sleep 2
+      continue
+    fi
+    # Normal prompt visible → consent has been cleared (or was never asked).
+    if echo "$pane" | grep -qE "bypass permissions on|cycle\)|Welcome back"; then
+      break
+    fi
+  done
+
+  tmux send-keys -t "$aux" C-c 2>/dev/null || true
+  sleep 1
+  tmux kill-session -t "$aux" 2>/dev/null || true
+  echo "[rig] consent-sweep done (legal=$accepted_legal trust=$accepted_trust)"
+}
+
+if [[ "${SKIP_CONSENT_SWEEP:-0}" != "1" ]]; then
+  consent_sweep
+fi
+
+# Clear stale sentinels BEFORE writing rig artifacts under /tmp/${SESSION}.*.
 sentinel_clear_all
 
-# Render hooks settings (path lives in the sentinel namespace by design;
-# clearing first keeps the freshly rendered file intact).
+# Render hooks.
 "$HERE/bin/render-hooks.sh" "$SPEC" "$SESSION" "$HOOKS_RENDERED"
 echo "[rig] hooks rendered -> $HOOKS_RENDERED"
 
-# Spawn the tmux session (detached).
-"$HERE/bin/tmux-session.sh" "$SPEC" "$HOOKS_RENDERED"
-# Target by bare session name — resolves to the active window's active pane
-# regardless of the user's tmux base-index / pane-base-index settings.
-export TMUX_TARGET="$SESSION"
-echo "[rig] tmux session up at $TMUX_TARGET"
+# Spawn tmux session and capture the agent pane ID.
+AGENT_PANE_ID=$("$HERE/bin/tmux-session.sh" "$SPEC" "$HOOKS_RENDERED")
+if [[ -z "$AGENT_PANE_ID" ]]; then
+  echo "record: tmux-session.sh did not emit agent pane id" >&2
+  exit 1
+fi
+# Target the agent pane by its stable %N id — immune to active-pane shifts
+# caused by a companion split-window AND to base-index/pane-base-index.
+export TMUX_TARGET="$AGENT_PANE_ID"
+echo "[rig] tmux session up; agent pane = $AGENT_PANE_ID"
 
 # Watcher: terminates once either (a) all panes are dead, or (b) agent-done
-# sentinel exists and AGENT_DONE_HOLD elapses. The agent-done backstop ensures
-# we always exit even if the agent's pane refuses to die.
+# sentinel exists and AGENT_DONE_HOLD elapses.
 (
   hold_remaining=""
   while :; do
@@ -116,9 +191,7 @@ echo "[rig] tmux session up at $TMUX_TARGET"
 ) &
 WATCHER_PID=$!
 
-# IMPORTANT ORDERING: start asciinema first and give it time to attach before
-# the driver pastes the opening command. Otherwise the first keystroke can land
-# in the pane before asciinema is capturing, and the cast starts mid-flow.
+# Start asciinema first so it's capturing before the driver's first keystroke.
 asciinema rec --overwrite --quiet \
   --output-format asciicast-v2 \
   --command "tmux attach -t $SESSION" \
@@ -127,14 +200,17 @@ ASCIINEMA_PID=$!
 
 sleep "$ATTACH_GAP_SEC"
 
-# Now start the driver.
+# Driver.
 "$HERE/bin/driver.sh" "$SPEC" &
 DRIVER_PID=$!
 
-# Wait for asciinema to exit (which happens when the watcher kills the session).
+# Wait for asciinema to exit (watcher kills the session when work is done).
 wait "$ASCIINEMA_PID" 2>/dev/null || true
 wait "$DRIVER_PID" 2>/dev/null || true
 wait "$WATCHER_PID" 2>/dev/null || true
+
+# Clear PIDs so the EXIT trap's kill calls become no-ops (processes already gone).
+ASCIINEMA_PID="" DRIVER_PID="" WATCHER_PID=""
 
 echo "[rig] cast captured: $CAST_OUT"
 

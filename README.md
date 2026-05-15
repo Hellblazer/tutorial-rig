@@ -30,6 +30,10 @@ bin/record.sh my-tutorial.json
 - **Reliable gate handling.** `AskUserQuestion` gates are handled by ordered gate decisions in
   the spec. The driver navigates to option N via (N−1) `Down` keypresses then `Enter`, holding
   for pre/post-Enter seconds for readability.
+- **Consent sweep.** Before recording, an auxiliary tmux session (not captured) dismisses
+  Claude's two interactive consent dialogs (`--dangerously-skip-permissions` legal accept;
+  per-workspace trust). Skip with `SKIP_CONSENT_SWEEP=1`. This is the only place the rig
+  does TUI screen-scrape, and it's outside the recorded window.
 - **Autonomous termination.** Driver sends `/exit` (falling back to `C-c` + `C-d`) when work is
   done so the tmux pane dies, asciinema returns, and the recording completes without manual
   intervention. A backstop in `record.sh` also kills the session once the `agent-done` sentinel
@@ -79,7 +83,9 @@ A tutorial is one JSON file. Fields:
   ],
 
   "companion": {                       // optional second pane
-    "command": "node my-observer.js",
+    "command": "node",                 // executable (program name only when args[] is set)
+    "args": ["my-observer.js"],        // optional; argv passed safely (%q-quoted) — use for
+                                       //   any command with spaces, quotes, or shell metas
     "wait_for_sentinels": ["project-id"],
     "env": { "SUBSCRIBE_TO": "$project-id" }   // $name resolves /tmp/${SESSION}.name at spawn
   },
@@ -91,7 +97,10 @@ A tutorial is one JSON file. Fields:
   },
 
   "pacing": {
-    "idle_seconds": 8,                 // Stop-mtime idle threshold
+    "idle_seconds": 8,                 // Stop-mtime idle threshold (turn-end stable for N s)
+    "turn_timeout_sec": 120,           // per-turn ceiling: if turn-end never progresses for this
+                                       //   long, abort (Stop hook may not be firing)
+    "session_max_sec": 1800,           // absolute upper bound on a single sentinel_wait_idle call
     "attach_gap_sec": 3,               // wait after asciinema start before driver pastes
     "agent_done_hold_sec": 4,          // kill-session backstop after agent-done
     "exit_hold_sec": 8,                // hold final frame before kill-session

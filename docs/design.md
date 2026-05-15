@@ -15,7 +15,16 @@ Every prior attempt at scripted Claude demos failed for the same reason: the dri
 
 The fix: Claude Code 2.x supports `--settings` with lifecycle hooks (`UserPromptSubmit`, `Stop`, `PreToolUse`, `PostToolUse`, `SessionStart`). Hooks fire from claude's lifecycle, not its rendered TUI. They don't drift. They emit structured stdin to a shell command, which we use to drop file sentinels under `/tmp/${SESSION}.*` that the driver and any companion processes watch.
 
-End-state: **zero pane-text matching**. Every coordination point is either a hook event or a backend state transition.
+End-state: **zero pane-text matching in the recorded session**. The one exception is a pre-recording **consent sweep** in an auxiliary tmux session (not captured by asciinema) that dismisses Claude's two interactive consent dialogs on first-run-per-machine and first-run-per-cwd. Those dialogs block `SessionStart` from firing and cannot be bypassed via command-line flags; bounded one-shot screen-scrape in a non-recorded pane is the pragmatic fix and the only TUI matching the rig does.
+
+## Validator scope and limitations
+
+`validate.mjs` concatenates the cast's `o` (output) events into one string, strips ANSI/CSI/OSC escapes plus control bytes, then runs `must_contain` / `must_contain_in_order` / `must_not_contain` set checks. It is **not** a terminal emulator. Two failure modes follow:
+
+- **Ghost text from cursor-overwritten content.** A progress line redrawn in place (e.g. `Working… 1s` → `Working… 2s` → `…`) leaves all variants in the concatenated string. `must_not_contain: ["Error:"]` could false-fail on a brief "Error: connecting…" that was overwritten by "Connected ok"; conversely `must_contain` could pass on content that was visible for one frame.
+- **Line-split content from terminal wrapping.** A long string that wraps across the right margin can split mid-character in the cast — `must_contain` won't find it if the cast happens to insert a control sequence at the wrap point.
+
+For most "did the agent produce a final answer" checks this is fine. For strict assertions about screen state, embed your assertion target on its own non-overwritten line (the rig's recommended pattern is to ask the agent to emit a sentinel string like `ANSWER=42` on a fresh line).
 
 ## Architecture
 

@@ -14,6 +14,8 @@ source "$HERE/lib/sentinels.sh"
 : "${TMUX_TARGET:?TMUX_TARGET required (e.g. tutorial:0.0)}"
 IDLE_SECONDS="${IDLE_SECONDS:-8}"
 ATTACH_GAP_SEC="${ATTACH_GAP_SEC:-3}"
+TURN_TIMEOUT_SEC="${TURN_TIMEOUT_SEC:-120}"
+SESSION_MAX_SEC="${SESSION_MAX_SEC:-1800}"
 
 paste_into() {
   local text="$1" buf="rig-buf-$$-$RANDOM"
@@ -54,10 +56,17 @@ answer_gate() {
   answer_index=$(jq -r ".gates[$i].answer_index // 1" "$SPEC")
   pre_sec=$(jq -r ".gates[$i].pre_enter_sec // 5" "$SPEC")
   post_sec=$(jq -r ".gates[$i].post_enter_sec // 2" "$SPEC")
+  # Minimum floor — the AskUserQuestion UI needs a moment to render after the
+  # PreToolUse sentinel drops; sending keys earlier loses them.
+  (( pre_sec < 1 )) && pre_sec=1
+  (( post_sec < 1 )) && post_sec=1
 
   case "$wait_for" in
     turn-end-idle)
-      sentinel_wait_idle "$IDLE_SECONDS"
+      sentinel_wait_idle "$IDLE_SECONDS" "$TURN_TIMEOUT_SEC" "$SESSION_MAX_SEC" || {
+        echo "driver: turn-idle wait failed before gate $i" >&2
+        return 1
+      }
       ;;
     gate-pending)
       sentinel_wait gate-pending 600
@@ -99,7 +108,11 @@ for cmd in "${COMMANDS[@]}"; do
     gate_idx=$(( gate_idx + 1 ))
   done
 
-  sentinel_wait_idle "$IDLE_SECONDS"
+  if ! sentinel_wait_idle "$IDLE_SECONDS" "$TURN_TIMEOUT_SEC" "$SESSION_MAX_SEC"; then
+    rc=$?
+    echo "driver: idle wait failed (rc=$rc) after command '$cmd' — aborting remaining commands" >&2
+    break
+  fi
 done
 
 touch "$(sentinel_path agent-done)"

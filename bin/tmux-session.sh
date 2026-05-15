@@ -2,6 +2,7 @@
 # Spawn a tmux session with the agent pane (and optional companion pane).
 # Usage: tmux-session.sh <spec.json> <hooks-rendered.json>
 # Env: SESSION
+# Stdout: <agent-pane-id> (caller exports as TMUX_TARGET).
 set -euo pipefail
 
 SPEC="$1"
@@ -33,13 +34,16 @@ done
 # Kill any prior session of this name.
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 
-# Agent pane. We target everything by bare session name (= active window's
-# active pane) so the rig is immune to the user's base-index / pane-base-index
-# settings in tmux.conf.
-tmux new-session -d -s "$SESSION" -x "$cols" -y "$rows" \
-  -c "$cwd" \
-  -e "SESSION=$SESSION" \
-  "$agent_cmd"
+# Agent pane. Capture the pane ID (%N form, immune to base-index AND to
+# active-pane shifts caused by later split-window) so the driver can target
+# this exact pane regardless of which pane is "active" later.
+AGENT_PANE_ID=$(
+  tmux new-session -d -s "$SESSION" -x "$cols" -y "$rows" \
+    -c "$cwd" \
+    -e "SESSION=$SESSION" \
+    -P -F '#{pane_id}' \
+    "$agent_cmd"
+)
 tmux set-option -t "$SESSION" remain-on-exit on
 
 # Optional companion pane.
@@ -60,20 +64,38 @@ if [[ -n "$companion_cmd" ]]; then
     [[ -z "$k" ]] && continue
     if [[ "$v" == \$* ]]; then
       sent="${v#\$}"
-      # cat the sentinel into a shell var (no quoting issues — shell does the read)
       resolve_env+="$(printf '%s=$(cat /tmp/%s.%s)\nexport %s\n' "$k" "$SESSION" "$sent" "$k")"
     else
       resolve_env+="$(printf 'export %s=%q\n' "$k" "$v")"
     fi
   done < <(jq -r '.companion.env // {} | to_entries[] | "\(.key)\t\(.value)"' "$SPEC")
 
+  # Build the companion exec line. If companion.args[] is set, treat
+  # companion.command as the program and args[] as its argv (safely %q-quoted).
+  # Otherwise fall back to companion.command as a single-line shell string
+  # (works for trivial cases like "node observer.mjs" with no spaces in args).
+  has_args=$(jq -r '(.companion.args // null) | (type == "array")' "$SPEC")
+  if [[ "$has_args" == "true" ]]; then
+    quoted_argv="$(printf '%q' "$companion_cmd")"
+    while IFS= read -r arg; do
+      quoted_argv+=" $(printf '%q' "$arg")"
+    done < <(jq -r '.companion.args[]' "$SPEC")
+    exec_line="exec $quoted_argv"
+  else
+    exec_line="exec $companion_cmd"
+  fi
+
   {
     printf 'export SESSION=%q\n' "$SESSION"
     printf '%s' "$wait_prelude"
     printf '%s' "$resolve_env"
+    printf '%s\n' "$exec_line"
   } > "$envfile"
 
-  tmux split-window -h -t "$SESSION" -c "$cwd" -e "SESSION=$SESSION" \
-    bash -lc ". $(printf '%q' "$envfile") && exec $companion_cmd"
+  tmux split-window -h -t "$AGENT_PANE_ID" -c "$cwd" -e "SESSION=$SESSION" \
+    bash -lc ". $(printf '%q' "$envfile")"
   tmux select-layout -t "$SESSION" even-horizontal
 fi
+
+# Emit the agent pane ID for record.sh to consume.
+printf '%s\n' "$AGENT_PANE_ID"
