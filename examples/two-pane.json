@@ -1,0 +1,31 @@
+{
+  "session": "rig-example-twopane",
+  "agent": {
+    "command": "/my-skill:start kick off the background job"
+  },
+  "hooks": {
+    "capture_tools": [
+      {
+        "name": "job-id",
+        "matcher": "^mcp__.*__start_job$",
+        "jq": ".job_id // .jobId"
+      }
+    ]
+  },
+  "gates": [],
+  "companion": {
+    "command": "node observer.mjs",
+    "wait_for_sentinels": ["job-id"],
+    "env": { "JOB_ID": "$job-id" }
+  },
+  "validate": {
+    "must_contain": ["job complete"],
+    "must_not_contain": ["step_aborted", "failure_reason"]
+  },
+  "pacing": {
+    "idle_seconds": 8,
+    "agg_idle_time_limit": 4,
+    "exit_hold_sec": 8,
+    "tmux_size": "220x55"
+  }
+}
