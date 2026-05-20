@@ -4,6 +4,9 @@ A reusable, language-agnostic framework for recording deterministic Claude Code 
 tutorials, demos, screencasts, regression fixtures, anything you want repeatable.
 Hook-driven coordination, no TUI scraping. See [`docs/design.md`](docs/design.md) for the rationale.
 
+![me as me, framed by me](docs/assets/me-as-me-framed-by-me.jpg)
+
+
 ### Getting started — single-pane
 
 ![getting started](docs/assets/getting-started.gif)
